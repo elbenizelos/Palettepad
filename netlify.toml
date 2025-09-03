@@ -1,0 +1,13 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# ensure SPA routes (client-side routing) work on refresh
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# optional: match your local Node version
+[build.environment]
+  NODE_VERSION = "20"
