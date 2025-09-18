@@ -12,9 +12,14 @@ import {
   nowStamp,
 } from "./lib/entriesStore";
 
-// NEW: Offers & Payments
+// Offers & Payments (existing)
 import ClientsPage from "./components/offers-payments/ClientsPage";
 import ClientDetailPage from "./components/offers-payments/ClientDetailPage";
+
+// NEW: One-click Offer Builder page
+import OfferBuilder from "./components/offers-payments/OfferBuilder";
+
+type Section = "palettes" | "biz" | "offer-builder";
 
 export default function App() {
   // ───────────────── PalettePad state (colors) ─────────────────
@@ -107,11 +112,10 @@ export default function App() {
     }
   }
 
-  // ─────────────── NEW: Offers & Payments UI toggle ───────────────
-  const [showBiz, setShowBiz] = useState<boolean>(false); // default: show PalettePad first
+  // ─────────────── Sections: Palettes | Biz | Offer Builder ───────────────
+  const [section, setSection] = useState<Section>("palettes");
   const [activeClientId, setActiveClientId] = useState<string | null>(null);
 
-  // Split the two sections for readability
   const renderPalettePad = () => (
     <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 shadow-2xl">
       <h1 className="text-xl font-bold">🎨 PalettePad</h1>
@@ -257,32 +261,55 @@ export default function App() {
       <ClientsPage onOpenClient={setActiveClientId} />
     );
 
+  const renderOfferBuilder = () => <OfferBuilder />;
+
   // ────────────────────────────────────────────────────────────────
   return (
     <div className="mx-auto max-w-6xl p-4">
-      <header className="mb-4 flex items-center justify-between">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">PalettePad</h1>
+
         <div className="flex gap-2">
           <button
             className={`rounded-xl px-4 py-2 border ${
-              !showBiz ? "bg-sky-400 text-slate-900 border-sky-500" : "border-slate-700"
+              section === "palettes"
+                ? "bg-sky-400 text-slate-900 border-sky-500"
+                : "border-slate-700"
             }`}
-            onClick={() => setShowBiz(false)}
+            onClick={() => setSection("palettes")}
           >
             Color Palettes
           </button>
+
           <button
             className={`rounded-xl px-4 py-2 border ${
-              showBiz ? "bg-sky-400 text-slate-900 border-sky-500" : "border-slate-700"
+              section === "biz"
+                ? "bg-sky-400 text-slate-900 border-sky-500"
+                : "border-slate-700"
             }`}
-            onClick={() => setShowBiz(true)}
+            onClick={() => setSection("biz")}
           >
             Offers & Payments
+          </button>
+
+          {/* NEW: Offer Builder tab */}
+          <button
+            className={`rounded-xl px-4 py-2 border ${
+              section === "offer-builder"
+                ? "bg-sky-400 text-slate-900 border-sky-500"
+                : "border-slate-700"
+            }`}
+            onClick={() => setSection("offer-builder")}
+            title="Create a full price offer from keywords (αστάρι, 3 χέρια, χρώμα, τρίψιμο...)"
+          >
+            Offer Builder
           </button>
         </div>
       </header>
 
-      {showBiz ? renderOffersPayments() : renderPalettePad()}
+      {section === "palettes" && renderPalettePad()}
+      {section === "biz" && renderOffersPayments()}
+      {section === "offer-builder" && renderOfferBuilder()}
     </div>
   );
 }
