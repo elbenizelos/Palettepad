@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   AlignmentType,
   Document,
@@ -497,9 +497,7 @@ export default function OfferBuilder() {
   function updateLine(id: string, patch: Partial<Line>) {
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
   }
-  function removeLine(id: string) {
-    setLines((prev) => prev.filter((l) => l.id !== id));
-  }
+  
 // Print: we’ll use Tailwind's print utilities to hide the left column
 function handlePrint() {
   window.print();
