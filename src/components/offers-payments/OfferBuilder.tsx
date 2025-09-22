@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+
 import {
   AlignmentType,
   Document,
@@ -25,6 +26,18 @@ type Line = {
   qty: number;
   unit: string;
   unitPrice: number;
+}
+type OfferStatus = "pending" | "accepted" | "rejected";
+
+type Offer = {
+  id: string;
+  customer: string;
+  project: string;
+  note: string;
+  createdAt: string; // ISO string
+  status: OfferStatus;
+  total: number;
+  lines: Line[];
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -45,6 +58,19 @@ const SUB_TITLES: Record<SubSection, string> = {
 
 function uuid() {
   return Math.random().toString(36).slice(2);
+}
+const OFFERS_KEY = "palettepad_offers_v1";
+
+function loadOffers(): Offer[] {
+  try {
+    const raw = localStorage.getItem(OFFERS_KEY);
+    return raw ? (JSON.parse(raw) as Offer[]) : [];
+  } catch {
+    return [];
+  }
+}
+function persistOffers(data: Offer[]) {
+  localStorage.setItem(OFFERS_KEY, JSON.stringify(data));
 }
 
 // Normalize Greek: lowercase + strip accents so "αστάρι" == "ασταρι"
@@ -403,6 +429,20 @@ export default function OfferBuilder() {
   const [customer, setCustomer] = useState("");
   const [project, setProject] = useState("");
   const [note, setNote] = useState("");
+  // Saved offers (stored in localStorage)
+const [offers, setOffers] = useState<Offer[]>(() => loadOffers());
+useEffect(() => {
+  persistOffers(offers);
+}, [offers]);
+
+// Offer status + creation date
+const [status] = useState<"pending" | "accepted" | "rejected">("pending");
+
+const [createdAt] = useState(new Date());
+
+// Customers list
+const [clients, setClients] = useState<string[]>(["Πελάτης Α", "Πελάτης Β"]);
+const [newCustomer, setNewCustomer] = useState("");
 
   // Main section selector
   const [main, setMain] = useState<MainSection>("exterior");
@@ -502,6 +542,52 @@ export default function OfferBuilder() {
 function handlePrint() {
   window.print();
 }
+// Save a new offer
+function saveNewOffer() {
+  const chosenCustomer =
+    customer === "__new" ? (newCustomer || "").trim() : (customer || "").trim();
+
+  if (!chosenCustomer) {
+    alert("Συμπλήρωσε πελάτη πριν την αποθήκευση.");
+    return;
+  }
+
+  const newOffer: Offer = {
+    id: uuid(),
+    customer: chosenCustomer,
+    project: (project || "").trim(),
+    note: (note || "").trim(),
+    createdAt: new Date().toISOString(),
+    status: "pending",
+    total,
+    // deep clone lines so later edits in the builder don't mutate saved offers
+    lines: JSON.parse(JSON.stringify(lines)),
+  };
+
+  setOffers((prev) => [newOffer, ...prev]);
+
+  if (customer === "__new" && newCustomer.trim()) {
+    setClients((prev) => [...prev, newCustomer.trim()]);
+    setCustomer(newCustomer.trim());
+    setNewCustomer("");
+  }
+
+  alert("Η προσφορά αποθηκεύτηκε ως «Εκκρεμεί».");
+}
+
+// Change status of an offer
+function setOfferStatus(id: string, next: OfferStatus) {
+  setOffers((prev) =>
+    prev.map((o) => (o.id === id ? { ...o, status: next } : o))
+  );
+}
+
+// Delete an offer
+function deleteOffer(id: string) {
+  if (confirm("Διαγραφή προσφοράς;")) {
+    setOffers((prev) => prev.filter((o) => o.id !== id));
+  }
+}
 
 // Export to Word (.docx)
 async function handleExportDocx() {
@@ -515,8 +601,7 @@ async function handleExportDocx() {
   };
   lines.forEach((l) => grouped[l.main][l.sub].push(l));
 
- const children: Array<Paragraph | Table> = [];
-
+  const children: Array<Paragraph | Table> = [];
 
   // Title
   children.push(
@@ -533,7 +618,9 @@ async function handleExportDocx() {
   if (project) {
     children.push(new Paragraph({ text: `Έργο: ${project}` }));
   }
-  children.push(new Paragraph({ text: `Ημερομηνία: ${new Date().toLocaleDateString()}` }));
+  children.push(
+    new Paragraph({ text: `Ημερομηνία: ${new Date().toLocaleDateString()}` })
+  );
   children.push(new Paragraph({ text: " " }));
 
   // Narrative (sentences)
@@ -543,7 +630,7 @@ async function handleExportDocx() {
 
     children.push(
       new Paragraph({
-        text: (m === "exterior" ? "Εξωτερικά" : "Εσωτερικά"),
+        text: m === "exterior" ? "Εξωτερικά" : "Εσωτερικά",
         heading: HeadingLevel.HEADING_2,
       })
     );
@@ -596,7 +683,7 @@ async function handleExportDocx() {
 
     children.push(
       new Paragraph({
-        text: (m === "exterior" ? "Τιμές — Εξωτερικά" : "Τιμές — Εσωτερικά"),
+        text: m === "exterior" ? "Τιμές — Εξωτερικά" : "Τιμές — Εσωτερικά",
         heading: HeadingLevel.HEADING_2,
       })
     );
@@ -677,8 +764,9 @@ async function handleExportDocx() {
   });
 
   const blob = await Packer.toBlob(doc);
-  const fileNameSafe =
-    (customer || project || "offer").toString().replace(/[^\p{L}\p{N}\-_ ]/gu, "");
+  const fileNameSafe = (customer || project || "offer")
+    .toString()
+    .replace(/[^\p{L}\p{N}\-_ ]/gu, "");
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -686,6 +774,7 @@ async function handleExportDocx() {
   a.click();
   URL.revokeObjectURL(url);
 }
+
 
   // Derived totals
   const subtotal = useMemo(
@@ -697,9 +786,6 @@ async function handleExportDocx() {
     [subtotal, vatEnabled, vatRate]
   );
   const total = subtotal + vatAmount;
-  
-
-  // Sentences grouped by main > sub (in catalog order)
   // Sentences grouped by main > sub (from current lines)
 const sentencesBy: Record<MainSection, Record<SubSection, string[]>> = {
   exterior: { walls: [], wood: [], rails: [], tiles: [], repairs: [] },
@@ -721,23 +807,52 @@ lines.forEach((l) => {
           <h1 className="text-2xl md:text-3xl font-semibold">Offer Builder</h1>
 
           {/* Customer / Project */}
-          <div className="grid gap-2 bg-neutral-900/60 rounded-xl p-4">
-            <label className="text-sm text-neutral-300">Customer</label>
-            <input
-              value={customer}
-              onChange={(e) => setCustomer(e.target.value)}
-              className="bg-neutral-800 rounded-xl px-3 py-2 outline-none focus:ring-2 ring-neutral-600"
-              placeholder="Customer full name / company"
-            />
-            <label className="text-sm text-neutral-300 mt-2">Work location</label>
-            <input
-              value={project}
-              onChange={(e) => setProject(e.target.value)}
-              className="bg-neutral-800 rounded-xl px-3 py-2 outline-none focus:ring-2 ring-neutral-600"
-              placeholder="Address or project description"
-            />
-            
-          </div>
+ <label className="text-sm text-neutral-300">Πελάτης</label>
+<select
+  value={customer}
+  onChange={(e) => setCustomer(e.target.value)}
+  className="bg-neutral-800 rounded-xl px-3 py-2 outline-none focus:ring-2 ring-neutral-600"
+>
+  <option value="">-- Επιλέξτε Πελάτη --</option>
+  {clients.map((c) => (
+    <option key={c} value={c}>{c}</option>
+  ))}
+  <option value="__new">➕ Προσθήκη Νέου Πελάτη</option>
+</select>
+
+{/* Project field should be OUTSIDE */}
+<label className="text-sm text-neutral-300 mt-2 block">Έργο</label>
+<input
+  value={project}
+  onChange={(e) => setProject(e.target.value)}
+  className="bg-neutral-800 rounded-xl px-3 py-2 outline-none focus:ring-2 ring-neutral-600"
+  placeholder="Διεύθυνση ή περιγραφή έργου"
+/>
+
+
+{customer === "__new" && (
+  <div className="mt-2 flex gap-2">
+    <input
+      value={newCustomer}
+      onChange={(e) => setNewCustomer(e.target.value)}
+      placeholder="Όνομα νέου πελάτη"
+      className="flex-1 bg-neutral-800 rounded-xl px-3 py-2 outline-none"
+    />
+    <button
+      onClick={() => {
+        if (newCustomer.trim()) {
+          setClients((prev) => [...prev, newCustomer]);
+          setCustomer(newCustomer);
+          setNewCustomer("");
+        }
+      }}
+      className="px-3 py-2 rounded-xl bg-green-600 hover:bg-green-700"
+    >
+      Αποθήκευση
+    </button>
+  </div>
+)}
+
 
           {/* Main section selector */}
           <div className="grid gap-2 bg-neutral-900/60 rounded-xl p-4">
@@ -882,33 +997,35 @@ lines.forEach((l) => {
             )}
           </div>
 
-          {/* VAT */}
-          <div className="grid gap-2 bg-neutral-900/60 rounded-xl p-4">
-            <div className="flex items-center gap-2">
-              <input
-                id="vat"
-                type="checkbox"
-                checked={vatEnabled}
-                onChange={(e) => setVatEnabled(e.target.checked)}
-              />
-              <label htmlFor="vat">Include VAT</label>
-              {vatEnabled && (
-                <div className="flex items-center gap-2 ml-4">
-                  <span className="text-sm text-neutral-300">Rate</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={vatRate}
-                    onChange={(e) => setVatRate(Number(e.target.value))}
-                    className="w-20 bg-neutral-800 rounded-lg px-2 py-1 outline-none focus:ring-2 ring-neutral-600"
-                  />
-                  <span>%</span>
-                </div>
-              )}
-            </div>
-          </div>
-          {/* Notes */}
+
+{/* VAT */}
+<div className="grid gap-2 bg-neutral-900/60 rounded-xl p-4">
+  <div className="flex items-center gap-2">
+    <input
+      id="vat"
+      type="checkbox"
+      checked={vatEnabled}
+      onChange={(e) => setVatEnabled(e.target.checked)}
+    />
+    <label htmlFor="vat">Include VAT</label>
+    {vatEnabled && (
+      <div className="flex items-center gap-2 ml-4">
+        <span className="text-sm text-neutral-300">Rate</span>
+        <input
+          type="number"
+          min={0}
+          max={100}
+          value={vatRate}
+          onChange={(e) => setVatRate(Number(e.target.value))}
+          className="w-20 bg-neutral-800 rounded-lg px-2 py-1 outline-none focus:ring-2 ring-neutral-600"
+        />
+        <span>%</span>
+      </div>
+    )}
+  </div>
+</div>
+
+{/* Notes */}
 <div className="grid gap-2 bg-neutral-900/60 rounded-xl p-4">
   <label htmlFor="notes" className="text-sm text-neutral-300">Σημειώσεις</label>
   <textarea
@@ -920,131 +1037,199 @@ lines.forEach((l) => {
   />
 </div>
 
-        </div>
+{/* Save Offer Button */}
+<div className="grid gap-2 bg-neutral-900/60 rounded-xl p-4">
+  <button
+    onClick={saveNewOffer}
+    className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white"
+  >
+    💾 Αποθήκευση Προσφοράς
+  </button>
+</div>
 
-        {/* RIGHT: Preview */}
-        <div className="bg-white text-neutral-900 rounded-2xl p-6">
-          <div className="max-w-2xl mx-auto">
-            {/* Header */}
-          <header className="border-b pb-3 mb-4 flex items-start justify-between">
-  <div>
-    <h2 className="text-2xl font-semibold">ΠΡΟΣΦΟΡΑ ΕΡΓΑΣΙΑΣ</h2>
-    <div className="text-sm mt-1 space-y-1">
-      {customer && (<div><span className="opacity-60">Πελάτης:</span> {customer}</div>)}
-      {project && (<div><span className="opacity-60">Έργο:</span> {project}</div>)}
-      <div className="opacity-60">Ημερομηνία: {new Date().toLocaleDateString()}</div>
+{/* Offers List */}
+<div id="offers-list" className="grid gap-3 bg-neutral-900/60 rounded-xl p-4">
+  <div className="flex items-center justify-between">
+    <h2 className="font-medium">Προσφορές</h2>
+    <span className="text-xs opacity-60">{offers.length}</span>
+  </div>
+
+  {offers.length === 0 ? (
+    <div className="text-sm text-neutral-400">
+      Δεν υπάρχουν αποθηκευμένες προσφορές.
     </div>
-  </div>
-
-  <div className="flex gap-2 print:hidden">
-    <button
-      onClick={handlePrint}
-      className="px-3 py-2 rounded-lg border border-neutral-300 hover:bg-neutral-100"
-    >
-      Print
-    </button>
-    <button
-      onClick={handleExportDocx}
-      className="px-3 py-2 rounded-lg border border-neutral-300 hover:bg-neutral-100"
-    >
-      Export .docx
-    </button>
-  </div>
-</header>
-
-
-            {/* Narrative */}
-            {(["exterior","interior"] as MainSection[]).map((m) => {
-  const anySubs = (["walls","wood","rails","tiles","repairs"] as SubSection[])
-    .some((sub) => sentencesBy[m][sub].length > 0);
-  if (!anySubs) return null;
-
-  return (
-    <div key={`prev-${m}`} className="mb-4">
-      <h3 className="text-lg font-semibold mb-1">{SECTION_TITLES[m]}</h3>
-
-      {(["walls","wood","rails","tiles","repairs"] as SubSection[]).map((sub) => {
-        const list = sentencesBy[m][sub];
-        if (list.length === 0) return null;
-        return (
-          <div key={`prev-${m}-${sub}`} className="mb-3">
-            <div className="font-semibold">{SUB_TITLES[sub]}</div>
-            {sub === "walls" && (
-              <p className="mb-1 opacity-90">
-                {m === "exterior"
-                  ? "Οι εργασίες που θα πραγματοποιηθούν στον εξωτερικό χώρο περιλαμβάνουν:"
-                  : "Στο εσωτερικό τμήμα θα γίνουν οι εξής εργασίες:"}
-              </p>
+  ) : (
+    <div className="space-y-2">
+      {offers.map((o) => (
+        <div key={o.id} className="bg-neutral-800/60 rounded-xl p-3">
+          <div className="text-sm">
+            <div><span className="opacity-70">Πελάτης:</span> {o.customer || "—"}</div>
+            {o.project && (
+              <div><span className="opacity-70">Έργο:</span> {o.project}</div>
             )}
-            <div className="space-y-1">
-              {list.map((s, i) => (
-                <p key={i}>{s}</p>
-              ))}
+            <div>
+              <span className="opacity-70">Ημερομηνία:</span>{" "}
+              {new Date(o.createdAt).toLocaleDateString()}
             </div>
-            <p className="my-2">---</p>
+            <div className="mt-1">
+              <span className="opacity-70">Κατάσταση:</span>{" "}
+              {o.status === "pending"
+                ? "Εκκρεμεί"
+                : o.status === "accepted"
+                ? "Εγκρίθηκε"
+                : "Απορρίφθηκε"}
+            </div>
+            <div className="mt-1">
+              <span className="opacity-70">Σύνολο:</span> €{o.total.toFixed(2)}
+            </div>
           </div>
-        );
-      })}
-    </div>
-  );
-})}
 
-
-            {/* Note */}
-            {note && (
-              <>
-                <h3 className="text-lg font-semibold mb-1">Σημείωση</h3>
-                <p className="mb-4">{note}</p>
-              </>
+          <div className="flex gap-2 mt-3">
+            {o.status === "pending" && (
+              <button
+                onClick={() => setOfferStatus(o.id, "accepted")}
+                className="px-3 py-1 rounded-lg bg-green-600 hover:bg-green-700 text-sm"
+              >
+                ✅ Αποδοχή
+              </button>
             )}
-
-            {/* Prices */}
-            {lines.length > 0 && (
-              <>
-                <p className="my-2">---</p>
-                <h3 className="text-lg font-semibold mb-2">Τιμές</h3>
-              {visibleSubs.map((sub) => {
-  const items = lines.filter((l) => l.sub === sub);
-  if (items.length === 0) return null;
-  return (
-    <div key={sub} className="mb-4">
-      <h3 className="font-semibold">{SUB_TITLES[sub]}</h3>
-      <ul className="ml-4 space-y-1">
-        {items.map((l) => (
-          <li key={l.id} className="flex justify-between">
-            <span>· {l.label.replace(/^.*?— /, "")}</span>
-            <span>€{(l.qty * l.unitPrice).toFixed(2)}</span>
-          </li>
-        ))}
-      </ul>
+            <button
+              onClick={() => deleteOffer(o.id)}
+              className="px-3 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-sm"
+            >
+              🗑️ Διαγραφή
+            </button>
+          </div>
+        </div>
+      ))}
     </div>
-  );
-})}
+  )}
+</div>  
+</div>  
+ {/* ✅ only this one closes it */}
 
-
-
-                {/* Totals */}
-                <div className="mt-4 ml-auto w-full sm:w-80">
-                  <div className="flex justify-between py-1 text-sm">
-                    <span className="opacity-70">Υποσύνολο</span>
-                    <span>€{subtotal.toFixed(2)}</span>
-                  </div>
-                  {vatEnabled && (
-                    <div className="flex justify-between py-1 text-sm">
-                      <span className="opacity-70">ΦΠΑ {vatRate}%</span>
-                      <span>€{vatAmount.toFixed(2)}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between py-2 text-base font-medium border-t mt-2">
-                    <span>Σύνολο</span>
-                    <span>€{total.toFixed(2)}</span>
-                  </div>
-                </div>
-              </>
-            )}
+{/* RIGHT: Preview */}
+<div className="bg-white text-neutral-900 rounded-2xl p-6">
+  <div className="max-w-2xl mx-auto">
+    {/* Header */}
+    <header className="border-b pb-3 mb-4 flex items-start justify-between">
+      <div>
+        <h2 className="text-2xl font-semibold">ΠΡΟΣΦΟΡΑ ΕΡΓΑΣΙΑΣ</h2>
+        <div className="text-sm mt-1 space-y-1">
+          {customer && (<div><span className="opacity-60">Πελάτης:</span> {customer}</div>)}
+          {project && (<div><span className="opacity-60">Έργο:</span> {project}</div>)}
+          <div className="opacity-60">Ημερομηνία Δημιουργίας: {createdAt.toLocaleDateString()}</div>
+          <div className="opacity-60">
+            Κατάσταση: {status === "pending" ? "Εκκρεμεί" : status === "accepted" ? "Εγκρίθηκε" : "Απορρίφθηκε"}
           </div>
         </div>
       </div>
-    </div>
-  );
+
+      <div className="flex gap-2 print:hidden">
+        <button
+          onClick={handlePrint}
+          className="px-3 py-2 rounded-lg border border-neutral-300 hover:bg-neutral-100"
+        >
+          Print
+        </button>
+        <button
+          onClick={handleExportDocx}
+          className="px-3 py-2 rounded-lg border border-neutral-300 hover:bg-neutral-100"
+        >
+          Export .docx
+        </button>
+      </div>
+    </header>
+
+    {/* Narrative */}
+    {(["exterior","interior"] as MainSection[]).map((m) => {
+      const anySubs = (["walls","wood","rails","tiles","repairs"] as SubSection[])
+        .some((sub) => sentencesBy[m][sub].length > 0);
+      if (!anySubs) return null;
+
+      return (
+        <div key={`prev-${m}`} className="mb-4">
+          <h3 className="text-lg font-semibold mb-1">{SECTION_TITLES[m]}</h3>
+
+          {(["walls","wood","rails","tiles","repairs"] as SubSection[]).map((sub) => {
+            const list = sentencesBy[m][sub];
+            if (list.length === 0) return null;
+            return (
+              <div key={`prev-${m}-${sub}`} className="mb-3">
+                <div className="font-semibold">{SUB_TITLES[sub]}</div>
+                {sub === "walls" && (
+                  <p className="mb-1 opacity-90">
+                    {m === "exterior"
+                      ? "Οι εργασίες που θα πραγματοποιηθούν στον εξωτερικό χώρο περιλαμβάνουν:"
+                      : "Στο εσωτερικό τμήμα θα γίνουν οι εξής εργασίες:"}
+                  </p>
+                )}
+                <div className="space-y-1">
+                  {list.map((s, i) => (
+                    <p key={i}>{s}</p>
+                  ))}
+                </div>
+                <p className="my-2">---</p>
+              </div>
+            );
+          })}
+        </div>
+      );
+    })}
+
+    {/* Note */}
+    {note && (
+      <>
+        <h3 className="text-lg font-semibold mb-1">Σημείωση</h3>
+        <p className="mb-4">{note}</p>
+      </>
+    )}
+
+    {/* Prices */}
+    {lines.length > 0 && (
+      <>
+        <p className="my-2">---</p>
+        <h3 className="text-lg font-semibold mb-2">Τιμές</h3>
+        {visibleSubs.map((sub) => {
+          const items = lines.filter((l) => l.sub === sub);
+          if (items.length === 0) return null;
+          return (
+            <div key={sub} className="mb-4">
+              <h3 className="font-semibold">{SUB_TITLES[sub]}</h3>
+              <ul className="ml-4 space-y-1">
+                {items.map((l) => (
+                  <li key={l.id} className="flex justify-between">
+                    <span>· {l.label.replace(/^.*?— /, "")}</span>
+                    <span>€{(l.qty * l.unitPrice).toFixed(2)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+
+        {/* Totals */}
+        <div className="mt-4 ml-auto w-full sm:w-80">
+          <div className="flex justify-between py-1 text-sm">
+            <span className="opacity-70">Υποσύνολο</span>
+            <span>€{subtotal.toFixed(2)}</span>
+          </div>
+          {vatEnabled && (
+            <div className="flex justify-between py-1 text-sm">
+              <span className="opacity-70">ΦΠΑ {vatRate}%</span>
+              <span>€{vatAmount.toFixed(2)}</span>
+            </div>
+          )}
+          <div className="flex justify-between py-2 text-base font-medium border-t mt-2">
+            <span>Σύνολο</span>
+            <span>€{total.toFixed(2)}</span>
+          </div>
+        </div>
+      </>
+    )}
+  </div>
+</div>
+  </div>
+</div>
+);
 }
